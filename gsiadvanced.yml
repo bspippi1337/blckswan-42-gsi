@@ -1,0 +1,114 @@
+name: Build REAL BLCKSWAN-42 GSI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: install deps
+        run: |
+          sudo apt update
+
+          sudo apt install -y \
+            wget \
+            unzip \
+            gzip \
+            xz-utils \
+            e2fsprogs \
+            simg2img \
+            img2simg \
+            erofs-utils \
+            android-sdk-libsparse-utils \
+            p7zip-full \
+            file
+
+      - name: fetch base
+        run: |
+          mkdir -p work out
+
+          wget --content-disposition \
+          -O work/base.img.gz \
+          "https://downloads.sourceforge.net/project/andyyan-gsi/lineage-21.x/lineage-21.0-20260506-UNOFFICIAL-gsi_arm64_vN.img.gz"
+
+          gunzip work/base.img.gz
+
+          mv work/base.img work/system.raw
+
+          file work/system.raw
+
+      - name: convert sparse if needed
+        run: |
+          set +e
+
+          simg2img work/system.raw work/system.ext4
+          RC=$?
+
+          if [ "$RC" != "0" ]; then
+            echo "[*] image already raw/ext4"
+            cp work/system.raw work/system.ext4
+          fi
+
+          file work/system.ext4
+
+      - name: fsck
+        run: |
+          e2fsck -fy work/system.ext4 || true
+
+      - name: resize image
+        run: |
+          truncate -s +512M work/system.ext4
+          resize2fs work/system.ext4 || true
+
+      - name: mount image
+        run: |
+          mkdir mnt
+
+          sudo mount -t ext4 -o loop rw work/system.ext4 mnt
+
+          ls mnt || true
+
+      - name: patch branding
+        run: |
+          sudo mkdir -p \
+            mnt/system/product/etc \
+            mnt/system/system_ext/etc
+
+          echo "BLCKSWAN-42" | sudo tee \
+            mnt/system/product/etc/blckswan_version.txt
+
+          sudo bash -c 'cat >> mnt/system/build.prop <<EOF
+ro.blckswan.name=BLCKSWAN-42
+ro.blckswan.node=node-42
+ro.product.system.brand=BLCKSWAN
+ro.product.system.model=BLCKSWAN-42
+ro.product.system.device=blckswan42
+persist.sys.timezone=Europe/Oslo
+EOF'
+
+      - name: cleanup mount
+        run: |
+          sync
+          sudo umount mnt
+
+      - name: shrink
+        run: |
+          e2fsck -fy work/system.ext4 || true
+          resize2fs -M work/system.ext4 || true
+
+      - name: convert sparse output
+        run: |
+          img2simg work/system.ext4 out/blckswan-42-gsi.img
+
+          sha256sum out/blckswan-42-gsi.img \
+          > out/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blckswan-42-gsi
+          path: out/*
