@@ -1,0 +1,21 @@
+name: Build BLCKSWAN-42 GSI Pack
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          tar -czf dist/blckswan-42-gsi-factory.tar.gz README.md blckswan42.prop debloat-packages.txt scripts docs overlay assets
+          sha256sum dist/* > dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blckswan-42-gsi-factory
+          path: dist/*
