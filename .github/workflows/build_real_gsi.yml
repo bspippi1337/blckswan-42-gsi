@@ -1,0 +1,89 @@
+name: Build REAL BLCKSWAN-42 GSI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install tools
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            simg2img \
+            img2simg \
+            e2fsprogs \
+            unzip \
+            xz-utils \
+            gzip \
+            wget \
+            zip \
+            p7zip-full
+
+      - name: fetch base gsi
+        run: |
+          mkdir -p work out
+
+          wget -O work/base.img.gz \
+          https://sourceforge.net/projects/andyyan-gsi/files/lineage-21.x/lineage-21.0-20260506-UNOFFICIAL-gsi_arm64_vN.img.gz/download
+
+          gunzip work/base.img.gz
+
+          mv work/base.img work/system.img
+
+      - name: expand filesystem
+        run: |
+          truncate -s +1G work/system.img
+          e2fsck -fy work/system.img || true
+          resize2fs work/system.img
+
+      - name: mount and patch
+        run: |
+          mkdir -p mnt
+
+          sudo mount -o loop work/system.img mnt
+
+          sudo mkdir -p \
+            mnt/system/product/etc \
+            mnt/system/product/media \
+            mnt/system/system_ext/etc
+
+          echo "BLCKSWAN-42" | sudo tee \
+            mnt/system/product/etc/blckswan_version.txt
+
+          sudo tee -a mnt/system/build.prop >/dev/null <<EOF
+ro.blckswan.name=BLCKSWAN-42
+ro.blckswan.node=node-42
+ro.product.system.brand=BLCKSWAN
+ro.product.system.device=blckswan42
+ro.product.system.model=BLCKSWAN-42
+persist.sys.timezone=Europe/Oslo
+EOF
+
+          sudo sed -i 's/lineage/blckswan/g' \
+            mnt/system/build.prop || true
+
+          sudo umount mnt
+
+      - name: shrink fs
+        run: |
+          e2fsck -fy work/system.img || true
+          resize2fs -M work/system.img
+
+      - name: package
+        run: |
+          cp work/system.img out/blckswan-42-gsi.img
+
+          cd out
+          sha256sum * > SHA256SUMS
+
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: blckswan-42-gsi
+          path: out/*
